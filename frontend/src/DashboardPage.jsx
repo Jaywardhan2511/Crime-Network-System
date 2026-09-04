@@ -14,23 +14,25 @@ const stats = [
 
 export default function DashboardPage() {
   return (
-    <div className="min-h-screen w-full flex bg-[#0B1220]">
+    <div className="h-screen w-full flex bg-[#0B1220] overflow-hidden">
       <Sidebar />
-      <main className="flex-1 p-8">
+      <main className="flex-1 p-8 min-h-0 flex flex-col overflow-hidden">
         <TopBar title="Investigation Overview" subtitle="Network intelligence at a glance" />
 
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          {stats.map((s) => (
-            <StatCard key={s.label} {...s} />
-          ))}
-        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto thin-scrollbar pr-1">
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            {stats.map((s) => (
+              <StatCard key={s.label} {...s} />
+            ))}
+          </div>
 
-        <div className="flex gap-6">
-          <NetworkOverview />
-          <RecentAlerts />
-        </div>
+          <div className="flex gap-6 mb-6">
+            <NetworkOverview />
+            <RecentAlerts />
+          </div>
 
-        <WhatChanged />
+          <WhatChanged />
+        </div>
       </main>
     </div>
   );
