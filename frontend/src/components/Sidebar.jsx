@@ -1,13 +1,14 @@
 import { NavLink } from "react-router-dom";
-import { LayoutGrid, Folder, Search, Share2, AlertTriangle, FileText } from "lucide-react";
+import { LayoutGrid, Folder, Search, Share2, AlertTriangle, FileText ,Upload } from "lucide-react";
 
 const navItems = [
-  { label: "Dashboard", icon: LayoutGrid, path: "/" },
+  { label: "Dashboard", icon: LayoutGrid, path: "/dashboard" },
   { label: "Cases", icon: Folder, path: "/cases" },
   { label: "Search", icon: Search, path: "/search" },
   { label: "Network", icon: Share2, path: "/network" },
   { label: "Alerts", icon: AlertTriangle, path: "/alerts" },
   { label: "Reports", icon: FileText, path: "/reports" },
+  { label: "Upload data", icon: Upload, path: "/upload"},
 ];
 
 export default function Sidebar() {
