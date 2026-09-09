@@ -3,6 +3,10 @@ from pathlib import Path
 import csv
 import io
 import json
+import hashlib
+import hmac
+import secrets
+import jwt
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,6 +54,14 @@ app.add_middleware(
 # -----------------------------
 # Database models
 # -----------------------------
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), unique=True, nullable=False, index=True)
+    password_hash = Column(String(500), nullable=False)
+    role = Column(String(50), default="investigator")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Entity(Base):
     __tablename__ = "entities"
@@ -138,6 +150,14 @@ Base.metadata.create_all(bind=engine)
 # -----------------------------
 # Request schemas
 # -----------------------------
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=6, max_length=200)
 
 class EntityCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
@@ -210,6 +230,51 @@ def log_action(
         details=details,
     ))
     db.commit()
+    
+SECRET_KEY = "cnas-development-secret-change-before-production"
+ALGORITHM = "HS256"
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+
+    password_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode(),
+        salt.encode(),
+        120000,
+    ).hex()
+
+    return f"{salt}${password_hash}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        salt, original_hash = stored_hash.split("$", 1)
+
+        new_hash = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode(),
+            salt.encode(),
+            120000,
+        ).hex()
+
+        return hmac.compare_digest(new_hash, original_hash)
+
+    except Exception:
+        return False
+
+
+def create_token(user: User):
+    return jwt.encode(
+        {
+            "user_id": user.id,
+            "username": user.username,
+            "role": user.role,
+        },
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
 
 
 def entity_dict(e: Entity):
@@ -262,7 +327,134 @@ def root():
 def health():
     return {"status": "healthy"}
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=6, max_length=200)
+
+@app.post("/auth/register")
+def register_user(data: RegisterRequest, db: Session = Depends(get_db)):
+
+    existing = (
+        db.query(User)
+        .filter(User.username == data.username)
+        .first()
+    )
+
+    if existing:
+        raise HTTPException(409, "Username already exists")
+
+    user = User(
+        username=data.username,
+        password_hash=hash_password(data.password),
+        role="investigator",
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "User registered successfully",
+        "username": user.username,
+    }
+
+
+@app.post("/auth/login")
+def login(data: LoginRequest, db: Session = Depends(get_db)):
+
+    user = (
+        db.query(User)
+        .filter(User.username == data.username)
+        .first()
+    )
+
+    if not user or not verify_password(
+        data.password,
+        user.password_hash
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password"
+        )
+
+    token = create_token(user)
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role,
+        },
+    }
+
+@app.post("/auth/register")
+def register_user(
+    data: RegisterRequest,
+    db: Session = Depends(get_db)
+):
+    existing = (
+        db.query(User)
+        .filter(User.username == data.username)
+        .first()
+    )
+
+    if existing:
+        raise HTTPException(409, "Username already exists")
+
+    user = User(
+        username=data.username,
+        password_hash=hash_password(data.password),
+        role="investigator",
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "User registered successfully",
+        "username": user.username,
+    }
+
+
+@app.post("/auth/login")
+def login_user(
+    data: LoginRequest,
+    db: Session = Depends(get_db)
+):
+    user = (
+        db.query(User)
+        .filter(User.username == data.username)
+        .first()
+    )
+
+    if not user or not verify_password(
+        data.password,
+        user.password_hash
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password"
+        )
+
+    token = create_token(user)
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role,
+        },
+    }
 # -----------------------------
 # Entities
 # -----------------------------
@@ -604,6 +796,28 @@ def get_network(
         "edges": edges,
     }
 
+    @app.get("/network")
+    def get_full_network(db: Session = Depends(get_db)):
+        entities = db.query(Entity).all()
+        relationships = db.query(Relationship).all()
+
+        return {
+            "nodes": [
+                entity_dict(entity)
+                for entity in entities
+            ],
+            "edges": [
+                {
+                    "id": relationship.id,
+                    "source": relationship.source_entity_id,
+                    "target": relationship.target_entity_id,
+                    "type": relationship.relationship_type,
+                    "confidence": relationship.confidence,
+                }
+                for relationship in relationships
+            ],
+        }
+
 
 # -----------------------------
 # Dashboard
@@ -797,6 +1011,7 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
 
         entities_created = 0
         relationships_created = 0
+        center_entity_id = None
 
         # -------------------------
         # Helper: find/create entity
@@ -858,6 +1073,9 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
                     row.get("source_type", "unknown"),
                     row.get("source_description", "")
                 )
+
+                if center_entity_id is None:
+                    center_entity_id = source.id
 
                 target = get_or_create_entity(
                     target_name,
@@ -929,7 +1147,8 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
             "message": "Upload processed successfully",
             "filename": file.filename,
             "entities_created": entities_created,
-            "relationships_created": relationships_created
+            "relationships_created": relationships_created,
+            "center_entity_id": center_entity_id
         }
 
     except HTTPException:
